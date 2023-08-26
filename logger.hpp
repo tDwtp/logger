@@ -29,7 +29,7 @@
 
 
 
-enum class Log : std::uint32_t {
+enum class Log : unsigned {
 	never   =  0, // ignore all logging
 	fatal   =  1, // app will terminate
 	alert   =  2, // app wont terminate, requires live adjustment to prevent FATAL
@@ -48,36 +48,23 @@ enum class Log : std::uint32_t {
 	other   = 14, // trace unrelated values additionally to calculations
 	all     = 15  // arbitrary information which does not seem relevant
 };
-extern Log log_level;
 
 class Trace final {
-	const std::string id;
-	Trace() = delete;
 
 public:
-
-	Trace(std::string name);
+	Trace() : id("") {};
+	Trace(std::string name) : id(name) { };
 	std::ostream& operator <<(const Log& log) const;
 	operator std::string() const { return id; }
+
+private:
+	const std::string id;
+
 };
 
 namespace trace {
-	template<typename T>
-	inline std::stringstream& arglist_(std::stringstream& out, T value)
-	{ out << value << ")"; return out; }
-
-	template<typename T, typename ... R>
-	inline std::stringstream& arglist_(std::stringstream& out, T value, R ... other)
-	{ out << value << ", "; return arglist_(out, other...); }
-
-	template<typename ... T>
-	inline std::string arglist(T ... value) {
-		std::stringstream ss; ss << "(";
-		return arglist_(ss, value...).str();
-	}
-	inline std::string arglist( ) { return "( )"; }
-
-	const Trace global(""); // any/none/generic/general
+	extern const Trace global; // any/none/generic/general
+	extern Log level;
 
 	void activate(std::string traceid);
 	void shutdown(std::string traceid);
@@ -85,6 +72,16 @@ namespace trace {
 	std::ostream& call   (std::string name, const Trace trace = global);
 	std::ostream& section(std::string name, const Trace trace = global);
 	std::ostream& value  (std::string name, const Trace trace = global);
+
+	template<typename T, typename ... R>
+	inline std::string arglist(T value, R... rest) {
+		std::stringstream ss;
+		ss << "(" << value;
+		int x[sizeof...(R)] = {(ss << ", " << rest, 0)...};
+		ss << ")";
+		return ss.str();
+	}
+	inline std::string arglist( ) { return "( )"; }
 }
 
 #endif /* LOGGER_H */
@@ -93,9 +90,6 @@ namespace trace {
 #undef LOGGER_IMPL
 
 
-// C
-#include <ctime>
-#include <cctype>
 // C++
 #include <chrono>
 #include <iostream>
@@ -103,23 +97,105 @@ namespace trace {
 #include <iomanip>
 #include <unordered_set>
 
-static std::string uppercase(std::string str) {
+Log trace::level = Log::never;
+
+static std::ostream ignore(nullptr);
+static std::unordered_set<std::string> active;
+static int trace_max = 0;
+
+static std::string& uppercase(std::string& str);
+static std::string log2string(const Log& level);
+static std::ostream& log2stream(const Log& level);
+static std::string getnow();
+
+
+std::ostream& Trace::operator<<(const Log& log) const {
+	std::string trace = this->id;
+	uppercase(trace);
+	if (!this->id.empty() && active.find(trace) == active.end())
+		return ignore;
+
+	std::ostream& out = log2stream(log);
+	out << getnow() << ' ' << log2string(log) << ' ';
+
+	if (!this->id.empty())
+		out << '(' << std::setw(trace_max) << this->id << ") ";
+	else if (trace_max > 0)
+		out << std::setw(trace_max+3) << " ";
+
+	return out;
+}
+
+
+std::ostream& trace::call(std::string funcname, const Trace trace) {
+	std::ostream& out = trace << Log::call << "-> " << funcname;
+	if (trace::level >= Log::args)
+		return out;
+	out << std::endl;
+	return ignore;
+}
+
+std::ostream& trace::section(std::string name, const Trace trace) {
+	std::ostream& out = trace << Log::section << name;
+	if (trace::level >= Log::verbose)
+		return out << ' ';
+	out << std::endl;
+	return ignore;
+}
+
+std::ostream& trace::value  (std::string name, const Trace trace) {
+	std::ostream& out = trace << Log::values << name;
+	if (trace::level >= Log::compute)
+		return out << " = ";
+	out << std::endl;
+	return ignore;
+}
+
+void trace::activate(std::string name) {
+	if (name.empty())
+		return; // global trace is always active
+	uppercase(name);
+	if (active.find(name) != active.end())
+		return; // already in list
+
+	active.insert(name);
+	trace_max = name.length() > trace_max ? name.length() : trace_max;
+}
+
+void trace::shutdown(std::string name) {
+	uppercase(name);
+	if (active.find(name) == active.end())
+		return; // nothing found in list
+
+	active.erase(name);
+	if (trace_max > name.length())
+		return; // no need to recalculate trace_max
+
+	int max = 0;
+	for (auto& trace : active)
+		max = trace.length() > max ? trace.length() : max;
+	trace_max = max;
+}
+
+
+
+const Trace trace::global("");
+
+
+
+// C
+#include <ctime>
+#include <cctype>
+
+static std::string& uppercase(std::string& str) {
 	std::transform(str.cbegin(), str.cend(), str.begin(),
 		[](unsigned char c) -> char { return std::toupper(c); }
 	);
 	return str;
 }
 
-static std::unordered_set<std::string> active_traces;
-static int trace_max = 0;
-
-Log log_level = Log::never;
-
-static std::ostream  ignore(nullptr);
-
-
-static std::string log2string(const Log& log) {
-	switch(log) {
+static std::string log2string(const Log& level) {
+	switch(level) {
 	case Log::fatal  : return "\033[31mFATAL  \033[m";
 	case Log::alert  : return "\033[31mALERT  \033[m";
 	case Log::error  : return "\033[31mERROR  \033[m";
@@ -141,102 +217,27 @@ static std::string log2string(const Log& log) {
 	}
 }
 
-
-static std::string getnow();
-static std::ostream& log2stream(const Log& log) {
-	uint32_t lvl = (std::uint32_t)(log);
-	if (lvl <= Log::never) return ignore;
-	if (lvl <= Log::warn ) return std::clog;
-	if (lvl <= Log::all  ) return std::cout;
+static std::ostream& log2stream(const Log& level) {
+	if (level > trace::level) return ignore;
+	if (level <=  Log::never) return ignore;
+	if (level <=  Log::warn ) return std::clog;
+	if (level <=  Log::all  ) return std::cout;
 	return ignore;
-}
-
-
-std::ostream& Trace::operator<<(const Log& log) const {
-	if (active_traces.find(uppercase(this->id)) != active_traces.end())
-		return ignore;
-
-	std::ostream& out = log2stream(log);
-	out << getnow() << log2string(log) << ' ';
-
-	if (this->id.empty())
-		out << std::setw(trace_max+3) << " ";
-	else
-		out << '(' << std::setw(trace_max) << this->id << ") ";
-
-	return out;
-}
-
-static std::unordered_set<std::string> all_traces;
-Trace::Trace(std::string name) : id(name) {
-	if (all_traces.find(uppercase(name)) != all_traces.end())
-		throw std::runtime_error("trace '"+name+"' already exists. Traces have to be global.");
-	all_traces.insert(uppercase(name));
-	// trace_max = name.length() > trace_max ? name.length() : trace_max;
-}
-
-
-std::ostream& trace::call(std::string funcname, const Trace trace) {
-	std::ostream& out = trace << Log::call << "-> " << funcname;
-	if (log_level >= Log::args)
-		return out;
-	out << std::endl;
-	return ignore;
-}
-std::ostream& trace::section(std::string name, const Trace trace) {
-#if defined(DEBUG)
-	std::ostream& out = trace << Log::section << sectname;
-	if (log_level >= Log::verbose)
-		return out;
-	out << std::endl;
-#endif
-	return ignore;
-}
-std::ostream& trace::value  (std::string name, const Trace trace) {
-#if defined(DEBUG)
-	std::ostream& out = trace << Log::values << valname;
-	if (log_level >= Log::compute)
-		return out << " = ";
-	out << std::endl;
-#else
-	return ignore;
-#endif
-}
-
-void trace::activate(std::string name) {
-	if (active_traces.find(uppercase(name)) != active_traces.end())
-		return; // already in list
-
-	active_traces.insert(uppercase(name));
-	trace_max = name.length() > trace_max ? name.length() : trace_max;
-}
-void trace::shutdown(std::string name) {
-	if (active_traces.find(uppercase(name)) == active_traces.end())
-		return; // nothing found in list
-
-	active_traces.erase(uppercase(name));
-	if (trace_max > name.length())
-		return; // no need to recalculate trace_max
-
-	int max = 0;
-	for (auto& trace : active_traces)
-		max = trace.length() > max ? trace.length() : max;
-	trace_max = max;
 }
 
 static std::string getnow() {
 	namespace sc = std::chrono;
 	using std::chrono::system_clock;
 
-	std::string date(24, ' ');
+	char date[25];
 	auto        cur  = system_clock::now();
 	std::time_t time = system_clock::to_time_t(cur);
 	std::tm*    now  = std::gmtime(&time);
 	int         ms   = (sc::duration_cast<sc::milliseconds>(cur.time_since_epoch()).count() % 1000);
 
-	std::strftime(&(date[0]), 24, "%Y-%m-%d %H:%M:%S.", now);
-	sprintf(&(date.data()[20]), "%03d", ms);
-	return date;
+	std::strftime(date, 24, "%Y-%m-%d %H:%M:%S.", now);
+	sprintf(date + 20, "%03d", ms);
+	return std::string(date);
 }
 
 #endif /* LOGGER_IMPL */
