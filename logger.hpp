@@ -114,13 +114,8 @@ static std::unordered_set<std::string> active_traces;
 static int trace_max = 0;
 
 Log log_level = Log::never;
-namespace logs {
 
-	std::ostream  ignore(NULL);
-	// std::ostream& out   (std::cout);
-	// std::ostream& error (std::clog);
-
-}
+static std::ostream  ignore(nullptr);
 
 
 static std::string log2string(const Log& log) {
@@ -145,26 +140,21 @@ static std::string log2string(const Log& log) {
 	default: return "\033[38mUNKNOWN \033[m:";
 	}
 }
-// operator std::string(const Log& log) { return log2string(log); }
 
 
 static std::string getnow();
 static std::ostream& log2stream(const Log& log) {
-	// std::ostream& out = logs::ignore;
 	uint32_t lvl = (std::uint32_t)(log);
-	if (lvl <= (std::uint32_t)Log::never) return logs::ignore;
-	if (lvl <= (std::uint32_t)Log::warn ) return std::clog;
-	if (lvl <= (std::uint32_t)Log::all  ) return std::cout;
-	return logs::ignore;
-
-	// return out;
+	if (lvl <= Log::never) return ignore;
+	if (lvl <= Log::warn ) return std::clog;
+	if (lvl <= Log::all  ) return std::cout;
+	return ignore;
 }
-// operator std::ostream(const Log& log) { return log2stream(log); }
 
 
 std::ostream& Trace::operator<<(const Log& log) const {
 	if (active_traces.find(uppercase(this->id)) != active_traces.end())
-		return logs::ignore;
+		return ignore;
 
 	std::ostream& out = log2stream(log);
 	out << getnow() << log2string(log) << ' ';
@@ -188,28 +178,28 @@ Trace::Trace(std::string name) : id(name) {
 
 std::ostream& trace::call(std::string funcname, const Trace trace) {
 	std::ostream& out = trace << Log::call << "-> " << funcname;
-	if (logs::level >= Log::args)
+	if (log_level >= Log::args)
 		return out;
 	out << std::endl;
-	return logs::ignore;
+	return ignore;
 }
 std::ostream& trace::section(std::string name, const Trace trace) {
 #if defined(DEBUG)
 	std::ostream& out = trace << Log::section << sectname;
-	if (logs::level >= Log::verbose)
+	if (log_level >= Log::verbose)
 		return out;
 	out << std::endl;
 #endif
-	return logs::ignore;
+	return ignore;
 }
 std::ostream& trace::value  (std::string name, const Trace trace) {
 #if defined(DEBUG)
 	std::ostream& out = trace << Log::values << valname;
-	if (logs::level >= Log::compute)
+	if (log_level >= Log::compute)
 		return out << " = ";
 	out << std::endl;
 #else
-	return logs::ignore;
+	return ignore;
 #endif
 }
 
