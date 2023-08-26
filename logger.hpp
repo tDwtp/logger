@@ -90,10 +90,13 @@ namespace trace {
 #undef LOGGER_IMPL
 
 
+// C
+#include <ctime>
+#include <cctype>
+
 // C++
 #include <chrono>
 #include <iostream>
-#include <algorithm>
 #include <iomanip>
 #include <unordered_set>
 
@@ -183,14 +186,9 @@ const Trace trace::global("");
 
 
 
-// C
-#include <ctime>
-#include <cctype>
-
 static std::string& uppercase(std::string& str) {
-	std::transform(str.cbegin(), str.cend(), str.begin(),
-		[](unsigned char c) -> char { return std::toupper(c); }
-	);
+	for (int i = 0; i < str.size(); ++i)
+		str[i] = std::toupper(str[i]);
 	return str;
 }
 
